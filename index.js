@@ -12,9 +12,9 @@ const {
   DisconnectReason
 } = require('@whiskeysockets/baileys')
 
-// ===========================
+// =======================================
 // RESET SESSION
-// ===========================
+// =======================================
 if (process.env.RESET_SESSION === 'true') {
 
   if (fs.existsSync('./session')) {
@@ -28,19 +28,21 @@ if (process.env.RESET_SESSION === 'true') {
   }
 }
 
-// ===========================
-// GLOBAL
-// ===========================
+// =======================================
+// GLOBAL SYSTEM
+// =======================================
 let sock = null
 let pairingUsed = false
 global.reconnecting = false
 
 const pendingReply = {}
 const greeted = {}
+const activeConversation = {}
+const lastOwnerReply = {}
 
-// ===========================
-// MONGODB CONNECT
-// ===========================
+// =======================================
+// MONGODB
+// =======================================
 mongoose.connect(process.env.MONGO_URL)
 
 .then(() => {
@@ -55,14 +57,14 @@ mongoose.connect(process.env.MONGO_URL)
 
 })
 
-// ===========================
+// =======================================
 // USER MODEL
-// ===========================
+// =======================================
 const User = mongoose.model('User', new mongoose.Schema({
 
   jid: String,
 
-  memory: {
+  name: {
     type: String,
     default: ''
   },
@@ -72,24 +74,49 @@ const User = mongoose.model('User', new mongoose.Schema({
     default: 'normal'
   },
 
+  energy: {
+    type: Number,
+    default: 100
+  },
+
+  relationship: {
+    type: Number,
+    default: 0
+  },
+
+  memory: {
+    type: String,
+    default: ''
+  },
+
+  topics: {
+    type: [String],
+    default: []
+  },
+
   lastChat: {
     type: String,
     default: ''
+  },
+
+  lastSeen: {
+    type: Date,
+    default: Date.now
   }
 
 }))
 
-// ===========================
+// =======================================
 // DETECT MOOD
-// ===========================
+// =======================================
 function detectMood(text) {
 
   const t = text.toLowerCase()
 
   if (
+    t.includes('benci') ||
     t.includes('marah') ||
-    t.includes('kesal') ||
-    t.includes('benci')
+    t.includes('kesal')
   ) {
     return 'dingin'
   }
@@ -111,33 +138,93 @@ function detectMood(text) {
   return 'normal'
 }
 
-// ===========================
+// =======================================
+// DETECT NAME
+// =======================================
+function detectName(text) {
+
+  const match =
+    text.match(/nama aku (.*)/i) ||
+    text.match(/aku (.*)/i)
+
+  if (match) {
+    return match[1]
+  }
+
+  return null
+}
+
+// =======================================
+// DETECT TOPIC
+// =======================================
+function detectTopic(text) {
+
+  const t = text.toLowerCase()
+
+  if (t.includes('kerja')) {
+    return 'pekerjaan'
+  }
+
+  if (t.includes('kuliah')) {
+    return 'kuliah'
+  }
+
+  if (t.includes('cinta')) {
+    return 'percintaan'
+  }
+
+  if (t.includes('sedih')) {
+    return 'emosi'
+  }
+
+  return null
+}
+
+// =======================================
+// HUMAN DELAY
+// =======================================
+function randomDelay() {
+
+  return Math.floor(
+    Math.random() * 4000
+  ) + 2000
+}
+
+// =======================================
 // AI RESPONSE
-// ===========================
+// =======================================
 async function askAI(text, user) {
 
-  let style = ''
+  let moodStyle = ''
 
   switch (user.mood) {
 
     case 'dingin':
-      style =
-        'Balas sedikit dingin tapi tetap manusiawi.'
+      moodStyle =
+        'Sedikit dingin tapi tetap manusiawi.'
       break
 
     case 'lembut':
-      style =
-        'Balas lembut dan perhatian.'
+      moodStyle =
+        'Lembut dan perhatian.'
       break
 
     case 'senang':
-      style =
-        'Balas santai dan hangat.'
+      moodStyle =
+        'Hangat dan santai.'
       break
 
     default:
-      style =
-        'Balas natural seperti manusia biasa.'
+      moodStyle =
+        'Natural seperti manusia.'
+  }
+
+  let energyStyle = ''
+
+  if (user.energy < 30) {
+
+    energyStyle =
+      'Kamu sedang sedikit lelah hari ini.'
   }
 
   try {
@@ -158,20 +245,42 @@ async function askAI(text, user) {
             content: `
 Kamu adalah Gemini, asisten pribadi WhatsApp milik Repi.
 
+KEPRIBADIAN:
+- natural seperti manusia
+- santai
+- tidak seperti robot
+- tidak terlalu formal
+- tidak terlalu panjang
+- jangan spam emoji
+- punya emosi halus
+- terasa hidup
+- kadang malu
+- kadang capek
+- kadang bercanda kecil
+
 ATURAN:
 - jangan pernah memanggil orang lain dengan nama Repi
 - Repi adalah pemilik akun
 - lawan bicara adalah orang lain
-- gunakan bahasa Indonesia santai
-- jangan seperti robot
-- jangan terlalu panjang
-- jangan spam emoji
-- jawab natural seperti manusia
+- jangan bilang kamu AI
+- jangan terdengar seperti customer service
 
-STYLE:
-${style}
+MOOD:
+${moodStyle}
 
-MEMORY USER:
+ENERGY:
+${energyStyle}
+
+NAMA USER:
+${user.name}
+
+RELATIONSHIP LEVEL:
+${user.relationship}
+
+TOPIK YANG SERING DIBAHAS:
+${user.topics.join(', ')}
+
+MEMORY:
 ${user.memory}
 `
           },
@@ -182,9 +291,9 @@ ${user.memory}
           }
         ],
 
-        temperature: 0.8,
+        temperature: 0.9,
 
-        max_tokens: 200
+        max_tokens: 250
       },
 
       {
@@ -214,20 +323,17 @@ ${user.memory}
       err.response?.data || err.message
     )
 
-    return 'Maaf, aku lagi error sebentar.'
+    return 'Hmm bentar ya 😅'
   }
 }
 
-// ===========================
+// =======================================
 // START BOT
-// ===========================
+// =======================================
 async function startBot() {
 
   const SESSION_PATH = './session'
 
-  // ===========================
-  // AUTH
-  // ===========================
   const {
     state,
     saveCreds
@@ -235,16 +341,10 @@ async function startBot() {
     SESSION_PATH
   )
 
-  // ===========================
-  // VERSION
-  // ===========================
   const {
     version
   } = await fetchLatestBaileysVersion()
 
-  // ===========================
-  // SOCKET
-  // ===========================
   sock = makeWASocket({
 
     version,
@@ -280,17 +380,17 @@ async function startBot() {
     fireInitQueries: false
   })
 
-  // ===========================
-  // SAVE SESSION
-  // ===========================
+  // =======================================
+  // SAVE CREDS
+  // =======================================
   sock.ev.on(
     'creds.update',
     saveCreds
   )
 
-  // ===========================
-  // CONNECTION UPDATE
-  // ===========================
+  // =======================================
+  // CONNECTION
+  // =======================================
   sock.ev.on(
     'connection.update',
 
@@ -301,9 +401,7 @@ async function startBot() {
         lastDisconnect
       } = update
 
-      // ===========================
       // CONNECTED
-      // ===========================
       if (connection === 'open') {
 
         console.log(
@@ -311,13 +409,11 @@ async function startBot() {
         )
 
         console.log(
-          '🤖 PERSONAL ASSISTANT ONLINE'
+          '🤖 ULTRA HUMAN AI ONLINE'
         )
       }
 
-      // ===========================
-      // PAIRING CODE
-      // ===========================
+      // PAIRING
       if (
         connection === 'connecting'
       ) {
@@ -361,9 +457,7 @@ async function startBot() {
         }
       }
 
-      // ===========================
-      // CONNECTION CLOSED
-      // ===========================
+      // CLOSE
       if (connection === 'close') {
 
         const shouldReconnect =
@@ -397,9 +491,9 @@ async function startBot() {
     }
   )
 
-  // ===========================
-  // MESSAGE HANDLER
-  // ===========================
+  // =======================================
+  // MESSAGE SYSTEM
+  // =======================================
   sock.ev.on(
     'messages.upsert',
 
@@ -411,10 +505,10 @@ async function startBot() {
 
         if (!m.message) return
 
-        if (m.key.fromMe) return
-
         const jid =
           m.key.remoteJid
+
+        if (!jid) return
 
         // ignore group
         if (
@@ -426,9 +520,23 @@ async function startBot() {
           jid === 'status@broadcast'
         ) return
 
-        // ===========================
-        // MESSAGE TEXT
-        // ===========================
+        // =======================================
+        // OWNER REPLY DETECT
+        // =======================================
+        if (m.key.fromMe) {
+
+          lastOwnerReply[jid] =
+            Date.now()
+
+          activeConversation[jid] =
+            false
+
+          return
+        }
+
+        // =======================================
+        // GET MESSAGE
+        // =======================================
         const text =
           m.message.conversation ||
           m.message.extendedTextMessage?.text ||
@@ -436,9 +544,9 @@ async function startBot() {
 
         if (!text) return
 
-        // ===========================
+        // =======================================
         // USER DATA
-        // ===========================
+        // =======================================
         let user =
           await User.findOne({ jid })
 
@@ -449,37 +557,90 @@ async function startBot() {
 
               jid,
 
-              memory: '',
+              name: '',
 
               mood: 'normal',
+
+              energy: 100,
+
+              relationship: 0,
+
+              memory: '',
+
+              topics: [],
 
               lastChat: ''
             })
         }
 
-        // ===========================
+        // =======================================
+        // NAME MEMORY
+        // =======================================
+        const detectedName =
+          detectName(text)
+
+        if (
+          detectedName &&
+          !user.name
+        ) {
+
+          user.name =
+            detectedName
+        }
+
+        // =======================================
+        // TOPIC MEMORY
+        // =======================================
+        const topic =
+          detectTopic(text)
+
+        if (
+          topic &&
+          !user.topics.includes(topic)
+        ) {
+
+          user.topics.push(topic)
+        }
+
+        // =======================================
         // UPDATE MEMORY
-        // ===========================
+        // =======================================
         user.memory =
           (
             user.memory +
             ' | ' +
             text
-          ).slice(-1500)
+          ).slice(-2500)
 
-        // ===========================
+        // =======================================
         // UPDATE MOOD
-        // ===========================
+        // =======================================
         user.mood =
           detectMood(text)
 
+        // =======================================
+        // RELATIONSHIP
+        // =======================================
+        user.relationship += 1
+
+        // =======================================
+        // ENERGY SYSTEM
+        // =======================================
+        user.energy -= 1
+
+        if (user.energy < 5) {
+          user.energy = 100
+        }
+
         user.lastChat = text
+
+        user.lastSeen = new Date()
 
         await user.save()
 
-        // ===========================
+        // =======================================
         // CLEAR TIMER
-        // ===========================
+        // =======================================
         if (
           pendingReply[jid]
         ) {
@@ -489,13 +650,28 @@ async function startBot() {
           )
         }
 
-        // ===========================
-        // WAIT 30 DETIK
-        // ===========================
+        // =======================================
+        // WAIT OWNER
+        // =======================================
         pendingReply[jid] =
           setTimeout(async () => {
 
             try {
+
+              // owner masih aktif
+              if (
+                lastOwnerReply[jid] &&
+                (
+                  Date.now() -
+                  lastOwnerReply[jid]
+                ) < 30000
+              ) {
+
+                return
+              }
+
+              activeConversation[jid] =
+                true
 
               const freshUser =
                 await User.findOne({
@@ -504,9 +680,9 @@ async function startBot() {
 
               if (!freshUser) return
 
-              // ===========================
-              // INTRO SEKALI
-              // ===========================
+              // =======================================
+              // INTRO
+              // =======================================
               if (
                 !greeted[jid]
               ) {
@@ -526,35 +702,34 @@ Ada yang bisa aku bantu?`
                 )
               }
 
-              // ===========================
-              // TYPING
-              // ===========================
+              // =======================================
+              // REALISTIC TYPING
+              // =======================================
               await sock.sendPresenceUpdate(
                 'composing',
                 jid
               )
 
-              // delay typing
               await new Promise(
                 resolve =>
                   setTimeout(
                     resolve,
-                    2000
+                    randomDelay()
                   )
               )
 
-              // ===========================
-              // AI REPLY
-              // ===========================
+              // =======================================
+              // AI RESPONSE
+              // =======================================
               const reply =
                 await askAI(
                   text,
                   freshUser
                 )
 
-              // ===========================
-              // SEND MESSAGE
-              // ===========================
+              // =======================================
+              // SEND
+              // =======================================
               await sock.sendMessage(
                 jid,
                 {
@@ -562,7 +737,6 @@ Ada yang bisa aku bantu?`
                 }
               )
 
-              // stop typing
               await sock.sendPresenceUpdate(
                 'paused',
                 jid

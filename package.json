@@ -1,7 +1,7 @@
 {
   "name": "wabot-ai",
   "version": "1.0.0",
-  "description": "Personal WhatsApp AI Assistant",
+  "description": "Ultra Human WhatsApp AI Assistant",
   "main": "index.js",
 
   "scripts": {
