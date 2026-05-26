@@ -11,8 +11,11 @@ const mongoose = require('mongoose')
 const axios = require('axios')
 const P = require('pino')
 
+let sock = null
+let pairingUsed = false
+
 // ======================
-// CONNECT MONGODB
+// CONNECT DATABASE
 // ======================
 mongoose.connect(process.env.MONGO_URL)
   .then(() => {
@@ -29,11 +32,6 @@ const User = mongoose.model('User', new mongoose.Schema({
 
   jid: String,
 
-  name: {
-    type: String,
-    default: 'User'
-  },
-
   memory: {
     type: String,
     default: ''
@@ -42,20 +40,18 @@ const User = mongoose.model('User', new mongoose.Schema({
   mood: {
     type: String,
     default: 'normal'
-  },
-
-  lastActive: Number
+  }
 
 }))
 
 // ======================
-// GLOBAL STATE
+// MEMORY
 // ======================
 const pendingReply = {}
 const greeted = {}
 
 // ======================
-// DETECT MOOD
+// MOOD
 // ======================
 function detectMood(text) {
 
@@ -63,7 +59,6 @@ function detectMood(text) {
 
   if (
     t.includes('marah') ||
-    t.includes('kesal') ||
     t.includes('benci')
   ) {
     return 'dingin'
@@ -76,48 +71,17 @@ function detectMood(text) {
     return 'lembut'
   }
 
-  if (
-    t.includes('makasih') ||
-    t.includes('terima kasih')
-  ) {
-    return 'senang'
-  }
-
   return 'normal'
 }
 
 // ======================
-// AI FUNCTION
+// AI
 // ======================
 async function askAI(text, user) {
 
-  let style = ''
-
-  switch (user.mood) {
-
-    case 'dingin':
-      style =
-        'Balas lebih dingin tapi tetap sopan'
-      break
-
-    case 'lembut':
-      style =
-        'Balas lebih perhatian dan lembut'
-      break
-
-    case 'senang':
-      style =
-        'Balas lebih hangat dan santai'
-      break
-
-    default:
-      style =
-        'Balas santai seperti manusia biasa'
-  }
-
   try {
 
-    const response = await axios.post(
+    const res = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
         model: 'llama-3.1-8b-instant',
@@ -127,19 +91,14 @@ async function askAI(text, user) {
             role: 'system',
             content: `
 Kamu adalah asisten pribadi WhatsApp.
+Balas natural seperti manusia.
+Jangan seperti robot.
+Gunakan bahasa santai Indonesia.
 
-ATURAN:
-- jangan terdengar seperti robot
-- jangan terlalu formal
-- jawab natural seperti manusia
-- gunakan bahasa santai Indonesia
-- jangan terlalu panjang
-- jangan gunakan emoji berlebihan
+Mood:
+${user.mood}
 
-STYLE:
-${style}
-
-MEMORY USER:
+Memory:
 ${user.memory}
 `
           },
@@ -149,20 +108,20 @@ ${user.memory}
           }
         ],
 
-        temperature: 0.9,
-        max_tokens: 250
+        temperature: 0.8,
+
+        max_tokens: 200
       },
+
       {
         headers: {
           Authorization:
-            `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type':
-            'application/json'
+            `Bearer ${process.env.GROQ_API_KEY}`
         }
       }
     )
 
-    return response.data
+    return res.data
       .choices[0]
       .message
       .content
@@ -170,8 +129,7 @@ ${user.memory}
   } catch (err) {
 
     console.log(
-      '⚠️ AI ERROR:',
-      err.response?.data || err.message
+      '⚠️ AI ERROR'
     )
 
     return 'Maaf, aku lagi error sebentar.'
@@ -194,20 +152,17 @@ async function startBot() {
     version
   } = await fetchLatestBaileysVersion()
 
-  // ======================
-  // CREATE SOCKET
-  // ======================
-  const sock = makeWASocket({
+  sock = makeWASocket({
 
     version,
 
     auth: state,
 
-    printQRInTerminal: false,
-
     logger: P({
       level: 'silent'
     }),
+
+    printQRInTerminal: false,
 
     browser: [
       'Ubuntu',
@@ -215,17 +170,13 @@ async function startBot() {
       '22.04.4'
     ],
 
-    syncFullHistory: false,
+    connectTimeoutMs: 60000,
+
+    keepAliveIntervalMs: 10000,
 
     markOnlineOnConnect: false,
 
-    generateHighQualityLinkPreview: false,
-
-    connectTimeoutMs: 60000,
-
-    defaultQueryTimeoutMs: 60000,
-
-    keepAliveIntervalMs: 10000
+    syncFullHistory: false
   })
 
   // ======================
@@ -249,29 +200,32 @@ async function startBot() {
       } = update
 
       // ======================
-      // OPEN
+      // CONNECTED
       // ======================
       if (connection === 'open') {
 
         console.log(
-          '🤖 PERSONAL ASSISTANT ONLINE'
+          '✅ WhatsApp Connected'
         )
       }
 
       // ======================
-      // PAIRING SYSTEM
+      // PAIRING
       // ======================
       if (
         connection === 'connecting'
       ) {
 
-        setTimeout(async () => {
+        if (
+          !state.creds.registered &&
+          !pairingUsed
+        ) {
 
-          try {
+          pairingUsed = true
 
-            if (
-              !sock.authState.creds.registered
-            ) {
+          setTimeout(async () => {
+
+            try {
 
               const code =
                 await sock.requestPairingCode(
@@ -286,36 +240,38 @@ async function startBot() {
 
 ╚════════════════════╝
 `)
+
+            } catch (err) {
+
+              console.log(
+                '❌ Pairing Failed'
+              )
             }
 
-          } catch (err) {
-
-            console.log(
-              '❌ Pairing Error:',
-              err.message
-            )
-          }
-
-        }, 20000)
+          }, 15000)
+        }
       }
 
       // ======================
-      // CONNECTION CLOSED
+      // CLOSE
       // ======================
       if (connection === 'close') {
 
-        const shouldReconnect =
-          lastDisconnect?.error?.output?.statusCode !==
-          DisconnectReason.loggedOut
+        const reason =
+          lastDisconnect?.error?.output
+            ?.statusCode
 
         console.log(
           '⚠️ Connection Closed'
         )
 
-        if (shouldReconnect) {
+        if (
+          reason !==
+          DisconnectReason.loggedOut
+        ) {
 
           console.log(
-            '🔄 Restarting Bot...'
+            '🔄 Reconnecting...'
           )
 
           setTimeout(() => {
@@ -327,7 +283,7 @@ async function startBot() {
   )
 
   // ======================
-  // MESSAGE HANDLER
+  // MESSAGE
   // ======================
   sock.ev.on(
     'messages.upsert',
@@ -339,25 +295,15 @@ async function startBot() {
 
         if (!m.message) return
 
+        if (m.key.fromMe) return
+
         const jid =
           m.key.remoteJid
 
-        // ignore group
         if (
           jid.endsWith('@g.us')
         ) return
 
-        // ignore status
-        if (
-          jid === 'status@broadcast'
-        ) return
-
-        // ignore own message
-        if (m.key.fromMe) return
-
-        // ======================
-        // GET MESSAGE
-        // ======================
         const text =
           m.message.conversation ||
           m.message.extendedTextMessage?.text ||
@@ -365,11 +311,6 @@ async function startBot() {
 
         if (!text) return
 
-        const now = Date.now()
-
-        // ======================
-        // LOAD USER
-        // ======================
         let user =
           await User.findOne({ jid })
 
@@ -380,40 +321,25 @@ async function startBot() {
 
               jid,
 
-              name:
-                m.pushName || 'User',
-
               memory: '',
 
-              mood: 'normal',
-
-              lastActive: now
+              mood: 'normal'
             })
         }
 
-        // ======================
-        // UPDATE MEMORY
-        // ======================
         user.memory =
           (
             user.memory +
             ' | ' +
             text
-          ).slice(-1500)
+          ).slice(-1000)
 
-        // ======================
-        // UPDATE MOOD
-        // ======================
         user.mood =
           detectMood(text)
 
-        user.lastActive = now
-
         await user.save()
 
-        // ======================
-        // RESET TIMER
-        // ======================
+        // reset timer
         if (
           pendingReply[jid]
         ) {
@@ -423,26 +349,18 @@ async function startBot() {
           )
         }
 
-        const lastText = text
-
-        // ======================
-        // WAIT 30 DETIK
-        // ======================
+        // wait 30s
         pendingReply[jid] =
           setTimeout(async () => {
 
             try {
 
-              const freshUser =
+              const fresh =
                 await User.findOne({
                   jid
                 })
 
-              if (!freshUser) return
-
-              // ======================
-              // INTRO
-              // ======================
+              // intro sekali
               if (
                 !greeted[jid]
               ) {
@@ -461,34 +379,17 @@ Ada yang bisa aku bantu?`
                 )
               }
 
-              // ======================
-              // TYPING EFFECT
-              // ======================
               await sock.sendPresenceUpdate(
                 'composing',
                 jid
               )
 
-              await new Promise(
-                resolve =>
-                  setTimeout(
-                    resolve,
-                    2000
-                  )
-              )
-
-              // ======================
-              // AI REPLY
-              // ======================
               const reply =
                 await askAI(
-                  lastText,
-                  freshUser
+                  text,
+                  fresh
                 )
 
-              // ======================
-              // SEND REPLY
-              // ======================
               await sock.sendMessage(
                 jid,
                 {
@@ -496,28 +397,20 @@ Ada yang bisa aku bantu?`
                 }
               )
 
-              await sock.sendPresenceUpdate(
-                'paused',
-                jid
-              )
-
-              delete pendingReply[jid]
-
             } catch (err) {
 
               console.log(
-                '❌ Reply Error:',
-                err.message
+                '❌ Reply Error'
               )
             }
 
           }, 30000)
+      }
 
-      } catch (err) {
+      catch (err) {
 
         console.log(
-          '❌ Message Error:',
-          err.message
+          '❌ Message Handler Error'
         )
       }
     }
