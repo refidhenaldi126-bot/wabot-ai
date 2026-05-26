@@ -1,5 +1,10 @@
 require('dotenv').config()
 
+const fs = require('fs')
+const mongoose = require('mongoose')
+const axios = require('axios')
+const P = require('pino')
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -7,13 +12,25 @@ const {
   DisconnectReason
 } = require('@whiskeysockets/baileys')
 
-const mongoose = require('mongoose')
-const axios = require('axios')
-const P = require('pino')
+// ===========================
+// RESET SESSION
+// ===========================
+if (process.env.RESET_SESSION === 'true') {
 
-// ======================
+  if (fs.existsSync('./session')) {
+
+    fs.rmSync('./session', {
+      recursive: true,
+      force: true
+    })
+
+    console.log('🗑️ Session deleted')
+  }
+}
+
+// ===========================
 // GLOBAL
-// ======================
+// ===========================
 let sock = null
 let pairingUsed = false
 global.reconnecting = false
@@ -21,20 +38,26 @@ global.reconnecting = false
 const pendingReply = {}
 const greeted = {}
 
-// ======================
-// CONNECT MONGODB
-// ======================
+// ===========================
+// MONGODB CONNECT
+// ===========================
 mongoose.connect(process.env.MONGO_URL)
-  .then(() => {
-    console.log('✅ MongoDB Connected')
-  })
-  .catch(err => {
-    console.log('❌ Mongo Error:', err.message)
-  })
 
-// ======================
+.then(() => {
+
+  console.log('✅ MongoDB Connected')
+
+})
+
+.catch((err) => {
+
+  console.log('❌ Mongo Error:', err.message)
+
+})
+
+// ===========================
 // USER MODEL
-// ======================
+// ===========================
 const User = mongoose.model('User', new mongoose.Schema({
 
   jid: String,
@@ -56,9 +79,9 @@ const User = mongoose.model('User', new mongoose.Schema({
 
 }))
 
-// ======================
+// ===========================
 // DETECT MOOD
-// ======================
+// ===========================
 function detectMood(text) {
 
   const t = text.toLowerCase()
@@ -88,9 +111,9 @@ function detectMood(text) {
   return 'normal'
 }
 
-// ======================
-// AI FUNCTION
-// ======================
+// ===========================
+// AI RESPONSE
+// ===========================
 async function askAI(text, user) {
 
   let style = ''
@@ -99,17 +122,17 @@ async function askAI(text, user) {
 
     case 'dingin':
       style =
-        'Balas sedikit dingin tapi tetap sopan dan manusiawi.'
+        'Balas sedikit dingin tapi tetap manusiawi.'
       break
 
     case 'lembut':
       style =
-        'Balas lebih lembut dan perhatian.'
+        'Balas lembut dan perhatian.'
       break
 
     case 'senang':
       style =
-        'Balas lebih hangat dan santai.'
+        'Balas santai dan hangat.'
       break
 
     default:
@@ -120,9 +143,11 @@ async function askAI(text, user) {
   try {
 
     const response = await axios.post(
+
       'https://api.groq.com/openai/v1/chat/completions',
 
       {
+
         model: 'llama-3.1-8b-instant',
 
         messages: [
@@ -137,8 +162,7 @@ ATURAN:
 - jangan pernah memanggil orang lain dengan nama Repi
 - Repi adalah pemilik akun
 - lawan bicara adalah orang lain
-- gunakan bahasa santai Indonesia
-- jangan terlalu formal
+- gunakan bahasa Indonesia santai
 - jangan seperti robot
 - jangan terlalu panjang
 - jangan spam emoji
@@ -164,6 +188,7 @@ ${user.memory}
       },
 
       {
+
         headers: {
 
           Authorization:
@@ -180,7 +205,9 @@ ${user.memory}
       .message
       .content
 
-  } catch (err) {
+  }
+
+  catch (err) {
 
     console.log(
       '⚠️ AI ERROR:',
@@ -191,19 +218,16 @@ ${user.memory}
   }
 }
 
-// ======================
+// ===========================
 // START BOT
-// ======================
+// ===========================
 async function startBot() {
 
-  // ======================
-  // SESSION PATH
-  // ======================
   const SESSION_PATH = './session'
 
-  // ======================
+  // ===========================
   // AUTH
-  // ======================
+  // ===========================
   const {
     state,
     saveCreds
@@ -211,16 +235,16 @@ async function startBot() {
     SESSION_PATH
   )
 
-  // ======================
+  // ===========================
   // VERSION
-  // ======================
+  // ===========================
   const {
     version
   } = await fetchLatestBaileysVersion()
 
-  // ======================
-  // CREATE SOCKET
-  // ======================
+  // ===========================
+  // SOCKET
+  // ===========================
   sock = makeWASocket({
 
     version,
@@ -256,19 +280,20 @@ async function startBot() {
     fireInitQueries: false
   })
 
-  // ======================
+  // ===========================
   // SAVE SESSION
-  // ======================
+  // ===========================
   sock.ev.on(
     'creds.update',
     saveCreds
   )
 
-  // ======================
+  // ===========================
   // CONNECTION UPDATE
-  // ======================
+  // ===========================
   sock.ev.on(
     'connection.update',
+
     async (update) => {
 
       const {
@@ -276,9 +301,9 @@ async function startBot() {
         lastDisconnect
       } = update
 
-      // ======================
-      // OPEN
-      // ======================
+      // ===========================
+      // CONNECTED
+      // ===========================
       if (connection === 'open') {
 
         console.log(
@@ -290,9 +315,9 @@ async function startBot() {
         )
       }
 
-      // ======================
-      // PAIRING SYSTEM
-      // ======================
+      // ===========================
+      // PAIRING CODE
+      // ===========================
       if (
         connection === 'connecting'
       ) {
@@ -322,7 +347,9 @@ async function startBot() {
 ╚════════════════════╝
 `)
 
-            } catch (err) {
+            }
+
+            catch (err) {
 
               console.log(
                 '❌ Pairing Error:',
@@ -334,9 +361,9 @@ async function startBot() {
         }
       }
 
-      // ======================
+      // ===========================
       // CONNECTION CLOSED
-      // ======================
+      // ===========================
       if (connection === 'close') {
 
         const shouldReconnect =
@@ -370,11 +397,12 @@ async function startBot() {
     }
   )
 
-  // ======================
+  // ===========================
   // MESSAGE HANDLER
-  // ======================
+  // ===========================
   sock.ev.on(
     'messages.upsert',
+
     async ({ messages }) => {
 
       try {
@@ -398,9 +426,9 @@ async function startBot() {
           jid === 'status@broadcast'
         ) return
 
-        // ======================
-        // GET MESSAGE
-        // ======================
+        // ===========================
+        // MESSAGE TEXT
+        // ===========================
         const text =
           m.message.conversation ||
           m.message.extendedTextMessage?.text ||
@@ -408,9 +436,9 @@ async function startBot() {
 
         if (!text) return
 
-        // ======================
-        // GET USER
-        // ======================
+        // ===========================
+        // USER DATA
+        // ===========================
         let user =
           await User.findOne({ jid })
 
@@ -429,9 +457,9 @@ async function startBot() {
             })
         }
 
-        // ======================
+        // ===========================
         // UPDATE MEMORY
-        // ======================
+        // ===========================
         user.memory =
           (
             user.memory +
@@ -439,9 +467,9 @@ async function startBot() {
             text
           ).slice(-1500)
 
-        // ======================
+        // ===========================
         // UPDATE MOOD
-        // ======================
+        // ===========================
         user.mood =
           detectMood(text)
 
@@ -449,9 +477,9 @@ async function startBot() {
 
         await user.save()
 
-        // ======================
+        // ===========================
         // CLEAR TIMER
-        // ======================
+        // ===========================
         if (
           pendingReply[jid]
         ) {
@@ -461,9 +489,9 @@ async function startBot() {
           )
         }
 
-        // ======================
+        // ===========================
         // WAIT 30 DETIK
-        // ======================
+        // ===========================
         pendingReply[jid] =
           setTimeout(async () => {
 
@@ -476,9 +504,9 @@ async function startBot() {
 
               if (!freshUser) return
 
-              // ======================
+              // ===========================
               // INTRO SEKALI
-              // ======================
+              // ===========================
               if (
                 !greeted[jid]
               ) {
@@ -498,17 +526,15 @@ Ada yang bisa aku bantu?`
                 )
               }
 
-              // ======================
-              // TYPING EFFECT
-              // ======================
+              // ===========================
+              // TYPING
+              // ===========================
               await sock.sendPresenceUpdate(
                 'composing',
                 jid
               )
 
-              // ======================
-              // DELAY
-              // ======================
+              // delay typing
               await new Promise(
                 resolve =>
                   setTimeout(
@@ -517,18 +543,18 @@ Ada yang bisa aku bantu?`
                   )
               )
 
-              // ======================
+              // ===========================
               // AI REPLY
-              // ======================
+              // ===========================
               const reply =
                 await askAI(
                   text,
                   freshUser
                 )
 
-              // ======================
+              // ===========================
               // SEND MESSAGE
-              // ======================
+              // ===========================
               await sock.sendMessage(
                 jid,
                 {
@@ -536,15 +562,15 @@ Ada yang bisa aku bantu?`
                 }
               )
 
-              // ======================
-              // STOP TYPING
-              // ======================
+              // stop typing
               await sock.sendPresenceUpdate(
                 'paused',
                 jid
               )
 
-            } catch (err) {
+            }
+
+            catch (err) {
 
               console.log(
                 '❌ Reply Error:',

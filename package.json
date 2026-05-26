@@ -1,6 +1,7 @@
 {
   "name": "wabot-ai",
   "version": "1.0.0",
+  "description": "Personal WhatsApp AI Assistant",
   "main": "index.js",
 
   "scripts": {
@@ -9,9 +10,9 @@
 
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.22",
-    "axios": "^1.6.8",
+    "axios": "^1.7.2",
     "dotenv": "^16.4.5",
-    "mongoose": "^8.3.1",
+    "mongoose": "^8.3.4",
     "pino": "^9.0.0"
   }
 }
