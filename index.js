@@ -99,7 +99,7 @@ async function askAI(text, user) {
 
     case 'dingin':
       style =
-        'Balas sedikit dingin tapi tetap manusiawi.'
+        'Balas sedikit dingin tapi tetap sopan dan manusiawi.'
       break
 
     case 'lembut':
@@ -109,7 +109,7 @@ async function askAI(text, user) {
 
     case 'senang':
       style =
-        'Balas hangat dan santai.'
+        'Balas lebih hangat dan santai.'
       break
 
     default:
@@ -131,15 +131,18 @@ async function askAI(text, user) {
             role: 'system',
 
             content: `
-Kamu adalah asisten pribadi WhatsApp.
+Kamu adalah Gemini, asisten pribadi WhatsApp milik Repi.
 
 ATURAN:
-- jangan seperti robot
+- jangan pernah memanggil orang lain dengan nama Repi
+- Repi adalah pemilik akun
+- lawan bicara adalah orang lain
 - gunakan bahasa santai Indonesia
-- jangan terlalu panjang
 - jangan terlalu formal
+- jangan seperti robot
+- jangan terlalu panjang
 - jangan spam emoji
-- berbicara natural seperti manusia
+- jawab natural seperti manusia
 
 STYLE:
 ${style}
@@ -209,7 +212,7 @@ async function startBot() {
   )
 
   // ======================
-  // BAILEYS VERSION
+  // VERSION
   // ======================
   const {
     version
@@ -332,7 +335,7 @@ async function startBot() {
       }
 
       // ======================
-      // CLOSE
+      // CONNECTION CLOSED
       // ======================
       if (connection === 'close') {
 
@@ -385,16 +388,12 @@ async function startBot() {
         const jid =
           m.key.remoteJid
 
-        // ======================
-        // IGNORE GROUP
-        // ======================
+        // ignore group
         if (
           jid.endsWith('@g.us')
         ) return
 
-        // ======================
-        // IGNORE STATUS
-        // ======================
+        // ignore status
         if (
           jid === 'status@broadcast'
         ) return
@@ -490,8 +489,9 @@ async function startBot() {
                   jid,
                   {
                     text:
-`Hai 👋
-Mungkin Repi sedang tidak memegang HP.
+`Hai, aku Gemini 👋
+
+Mungkin Repi sedang tidak memegang ponsel sekarang.
 
 Ada yang bisa aku bantu?`
                   }
@@ -499,7 +499,7 @@ Ada yang bisa aku bantu?`
               }
 
               // ======================
-              // TYPING
+              // TYPING EFFECT
               // ======================
               await sock.sendPresenceUpdate(
                 'composing',
