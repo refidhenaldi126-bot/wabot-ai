@@ -13,403 +13,199 @@ const axios = require('axios')
 const P = require('pino')
 
 // ======================
-// MEMORY AI
+// ANTI CRASH (PRODUCTION SAFE)
 // ======================
+process.on('uncaughtException', console.log)
+process.on('unhandledRejection', console.log)
 
+// ======================
+// MEMORY
+// ======================
 const memory = {}
-
-// ======================
-// TAKEOVER SYSTEM
-// ======================
-
 const aiTakeover = {}
 const waitingTimer = {}
 
 // ======================
-// AI FUNCTION
+// HUMAN AI FUNCTION
 // ======================
-
 async function askAI(jid, question) {
-
   try {
-
-    // memory chat
     if (!memory[jid]) {
-
       memory[jid] = [
         {
           role: 'system',
-          content:
-`Kamu adalah Gemini, asisten pribadi WhatsApp milik Repi 😄
+          content: `Kamu adalah Gemini, teman chat pribadi WhatsApp milik Repi 😄
 
-Tugasmu:
-- membantu membalas chat owner
-- berbicara natural seperti manusia
-- santai dan ramah
-- gunakan emoji sewajarnya
-- jangan terlalu formal`
+Kamu bukan AI formal, kamu adalah teman ngobrol manusia.
+
+Gaya kamu:
+- santai, natural, seperti manusia asli
+- pakai bahasa sehari-hari (iya, hmm, wkwk, oh gitu)
+- emoji secukupnya 😄🔥👍
+- jawaban singkat kalau ringan
+- jawaban jelas kalau serius
+- bisa bercanda ringan kalau cocok
+
+Kamu punya emosi ringan:
+- senang 😄
+- bingung 🤔
+- santai 😎
+- kaget 😳
+
+Kalau user curhat, kamu harus empati seperti teman.
+Jangan pernah terdengar seperti AI formal.`
         }
       ]
-
     }
 
-    // simpan chat user
-    memory[jid].push({
-      role: 'user',
-      content: question
-    })
+    memory[jid].push({ role: 'user', content: question })
 
-    // batas memory
-    if (memory[jid].length > 20) {
-      memory[jid].shift()
-    }
+    if (memory[jid].length > 20) memory[jid].shift()
 
-    // request AI
     const response = await axios.post(
-
       'https://api.groq.com/openai/v1/chat/completions',
-
       {
         model: 'llama-3.3-70b-versatile',
-
         messages: memory[jid],
-
         temperature: 0.8,
-        max_tokens: 1000
+        max_tokens: 800
       },
-
       {
         headers: {
-
-          Authorization:
-          `Bearer ${process.env.GROQ_API_KEY}`,
-
-          'Content-Type':
-          'application/json'
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
         }
       }
     )
 
-    const aiReply =
-    response.data
-    .choices[0]
-    .message
-    .content
+    const aiReply = response.data.choices[0].message.content
 
-    // simpan jawaban AI
-    memory[jid].push({
-      role: 'assistant',
-      content: aiReply
-    })
+    memory[jid].push({ role: 'assistant', content: aiReply })
 
     return aiReply
-
   } catch (err) {
-
-    console.log(
-      err.response?.data ||
-      err.message
-    )
-
-    return 'Maaf 😭 Gemini sedang error.'
+    console.log(err.message)
+    return 'Maaf 😭 AI lagi error bentar.'
   }
-
 }
 
 // ======================
 // START BOT
 // ======================
-
 async function startBot() {
+  console.log('🚀 Bot starting...')
 
-  const {
-    state,
-    saveCreds
-  } = await useMultiFileAuthState(
-    './session'
-  )
+  const { state, saveCreds } = await useMultiFileAuthState('./session')
 
-  const { version } =
-  await fetchLatestBaileysVersion()
+  const { version } = await fetchLatestBaileysVersion()
 
   const sock = makeWASocket({
-
     version,
-
     auth: state,
-
-    logger: P({
-      level: 'silent'
-    }),
-
-    browser: [
-      'Ubuntu',
-      'Chrome',
-      '20.0.04'
-    ]
-
+    logger: P({ level: 'silent' }),
+    browser: ['Ubuntu', 'Chrome', '20.0.04']
   })
 
-  // ======================
-  // SAVE SESSION
-  // ======================
-
-  sock.ev.on(
-    'creds.update',
-    saveCreds
-  )
+  // save session
+  sock.ev.on('creds.update', saveCreds)
 
   // ======================
   // CONNECTION
   // ======================
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update
 
-  sock.ev.on(
-    'connection.update',
+    // QR HANDLER (STABLE)
+    if (qr && connection !== 'open') {
+      console.log('\n=== SCAN QR ===')
+      qrcode.generate(qr, { small: true })
+    }
 
-    async (update) => {
+    // CONNECTED
+    if (connection === 'open') {
+      console.log('✅ BOT ONLINE 🚀')
+    }
 
-      const {
-        connection,
-        lastDisconnect,
-        qr
-      } = update
+    // DISCONNECTED
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error?.output?.statusCode
 
-      // ======================
-      // QR CODE
-      // ======================
+      const shouldReconnect =
+        statusCode !== DisconnectReason.loggedOut
 
-      if (qr) {
+      console.log('❌ Koneksi terputus')
 
-        console.log(
-          '\n===================='
-        )
+      if (shouldReconnect) {
+        console.log('🔄 Reconnecting...')
 
-        console.log(
-          'SCAN QR INI 😄'
-        )
-
-        console.log(
-          '====================\n'
-        )
-
-        qrcode.generate(
-          qr,
-          {
-            small: true
-          }
-        )
-
-      }
-
-      // ======================
-      // CONNECTED
-      // ======================
-
-      if (connection === 'open') {
-
-        console.log(
-          '✅ Gemini Personal Assistant Online 🚀'
-        )
-
-      }
-
-      // ======================
-      // DISCONNECTED
-      // ======================
-
-      if (connection === 'close') {
-
-        const shouldReconnect =
-
-          lastDisconnect?.error
-          ?.output?.statusCode !==
-          DisconnectReason.loggedOut
-
-        console.log(
-          '❌ Koneksi terputus'
-        )
-
-        if (shouldReconnect) {
-
-          console.log(
-            '🔄 Reconnecting...'
-          )
-
+        setTimeout(() => {
           startBot()
-
-        }
-
+        }, 5000)
+      } else {
+        console.log('❌ Logged out (scan QR ulang)')
       }
-
     }
-  )
+  })
 
   // ======================
-  // MESSAGE
+  // MESSAGE HANDLER
   // ======================
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    const msg = messages[0]
+    if (!msg.message) return
 
-  sock.ev.on(
-    'messages.upsert',
+    const jid = msg.key.remoteJid
+    if (jid === 'status@broadcast') return
 
-    async ({ messages }) => {
+    const text =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      ''
 
-      try {
+    if (!text) return
 
-        const msg = messages[0]
+    const isFromMe = msg.key.fromMe
 
-        if (!msg.message) return
+    console.log('Pesan:', text)
 
-        const jid =
-        msg.key.remoteJid
-
-        // abaikan status WA
-        if (
-          jid === 'status@broadcast'
-        ) return
-
-        const text =
-
-          msg.message.conversation ||
-
-          msg.message.extendedTextMessage
-          ?.text ||
-
-          ''
-
-        if (!text) return
-
-        const isFromMe =
-        msg.key.fromMe
-
-        console.log(
-          'Pesan:',
-          text
-        )
-
-        // ======================
-        // OWNER ACTIVE
-        // ======================
-
-        if (isFromMe) {
-
-          console.log(
-            'Repi kembali 😄'
-          )
-
-          aiTakeover[jid] = false
-
-          if (waitingTimer[jid]) {
-
-            clearTimeout(
-              waitingTimer[jid]
-            )
-
-          }
-
-          return
-        }
-
-        // ======================
-        // AI TAKEOVER
-        // ======================
-
-        if (aiTakeover[jid]) {
-
-          console.log(
-            'Gemini sedang handle chat...'
-          )
-
-          await sock.sendPresenceUpdate(
-            'composing',
-            jid
-          )
-
-          await delay(3000)
-
-          const aiReply =
-          await askAI(
-            jid,
-            text
-          )
-
-          await sock.sendMessage(
-            jid,
-            {
-              text: aiReply
-            }
-          )
-
-          await sock.sendPresenceUpdate(
-            'paused',
-            jid
-          )
-
-          return
-        }
-
-        // ======================
-        // TIMER 30 DETIK
-        // ======================
-
-        if (waitingTimer[jid]) {
-
-          clearTimeout(
-            waitingTimer[jid]
-          )
-
-        }
-
-        console.log(
-          'Menunggu Repi 30 detik...'
-        )
-
-        waitingTimer[jid] =
-
-        setTimeout(async () => {
-
-          console.log(
-            'Gemini takeover aktif 😄'
-          )
-
-          aiTakeover[jid] = true
-
-          await sock.sendPresenceUpdate(
-            'composing',
-            jid
-          )
-
-          await delay(3000)
-
-          const intro =
-`Hai 👋
-Aku Gemini asistennya Repi 😄
-
-Silakan tunggu sebentar ya...
-Repi mungkin sedang tidak memegang HP 🙏`
-
-          await sock.sendMessage(
-            jid,
-            {
-              text: intro
-            }
-          )
-
-          await sock.sendPresenceUpdate(
-            'paused',
-            jid
-          )
-
-        }, 30000)
-
-      } catch (err) {
-
-        console.log(err)
-
-      }
-
+    // reset takeover kalau owner chat
+    if (isFromMe) {
+      aiTakeover[jid] = false
+      if (waitingTimer[jid]) clearTimeout(waitingTimer[jid])
+      return
     }
-  )
 
+    // AI takeover mode
+    if (aiTakeover[jid]) {
+      await sock.sendPresenceUpdate('composing', jid)
+      await delay(1500)
+
+      const aiReply = await askAI(jid, text)
+
+      await sock.sendMessage(jid, { text: aiReply })
+      await sock.sendPresenceUpdate('paused', jid)
+      return
+    }
+
+    // reset timer
+    if (waitingTimer[jid]) clearTimeout(waitingTimer[jid])
+
+    console.log('Menunggu 30 detik...')
+
+    waitingTimer[jid] = setTimeout(async () => {
+      aiTakeover[jid] = true
+
+      console.log('🤖 AI takeover aktif')
+
+      await sock.sendPresenceUpdate('composing', jid)
+      await delay(1500)
+
+      const aiReply = await askAI(jid, text)
+
+      await sock.sendMessage(jid, { text: aiReply })
+      await sock.sendPresenceUpdate('paused', jid)
+    }, 30000)
+  })
 }
 
 startBot()
