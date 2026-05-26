@@ -16,6 +16,7 @@ const P = require('pino')
 // ======================
 let sock = null
 let pairingUsed = false
+global.reconnecting = false
 
 const pendingReply = {}
 const greeted = {}
@@ -46,6 +47,11 @@ const User = mongoose.model('User', new mongoose.Schema({
   mood: {
     type: String,
     default: 'normal'
+  },
+
+  lastChat: {
+    type: String,
+    default: ''
   }
 
 }))
@@ -87,6 +93,30 @@ function detectMood(text) {
 // ======================
 async function askAI(text, user) {
 
+  let style = ''
+
+  switch (user.mood) {
+
+    case 'dingin':
+      style =
+        'Balas sedikit dingin tapi tetap manusiawi.'
+      break
+
+    case 'lembut':
+      style =
+        'Balas lebih lembut dan perhatian.'
+      break
+
+    case 'senang':
+      style =
+        'Balas hangat dan santai.'
+      break
+
+    default:
+      style =
+        'Balas natural seperti manusia biasa.'
+  }
+
   try {
 
     const response = await axios.post(
@@ -104,17 +134,17 @@ async function askAI(text, user) {
 Kamu adalah asisten pribadi WhatsApp.
 
 ATURAN:
-- bicara natural seperti manusia
 - jangan seperti robot
-- jangan terlalu formal
 - gunakan bahasa santai Indonesia
 - jangan terlalu panjang
+- jangan terlalu formal
 - jangan spam emoji
+- berbicara natural seperti manusia
 
-Mood user:
-${user.mood}
+STYLE:
+${style}
 
-Memory user:
+MEMORY USER:
 ${user.memory}
 `
           },
@@ -164,12 +194,9 @@ ${user.memory}
 async function startBot() {
 
   // ======================
-  // AUTO SESSION PATH
+  // SESSION PATH
   // ======================
-  const SESSION_PATH =
-    process.env.RAILWAY_ENVIRONMENT
-      ? '/app/session'
-      : './session'
+  const SESSION_PATH = './session'
 
   // ======================
   // AUTH
@@ -182,7 +209,7 @@ async function startBot() {
   )
 
   // ======================
-  // VERSION
+  // BAILEYS VERSION
   // ======================
   const {
     version
@@ -219,7 +246,11 @@ async function startBot() {
 
     defaultQueryTimeoutMs: 60000,
 
-    keepAliveIntervalMs: 10000
+    keepAliveIntervalMs: 30000,
+
+    emitOwnEvents: false,
+
+    fireInitQueries: false
   })
 
   // ======================
@@ -243,9 +274,13 @@ async function startBot() {
       } = update
 
       // ======================
-      // CONNECTED
+      // OPEN
       // ======================
       if (connection === 'open') {
+
+        console.log(
+          '✅ WhatsApp Connected'
+        )
 
         console.log(
           '🤖 PERSONAL ASSISTANT ONLINE'
@@ -297,7 +332,7 @@ async function startBot() {
       }
 
       // ======================
-      // CONNECTION CLOSED
+      // CLOSE
       // ======================
       if (connection === 'close') {
 
@@ -309,15 +344,24 @@ async function startBot() {
           '⚠️ Connection Closed'
         )
 
-        if (shouldReconnect) {
+        if (
+          shouldReconnect &&
+          !global.reconnecting
+        ) {
+
+          global.reconnecting = true
 
           console.log(
             '🔄 Reconnecting...'
           )
 
           setTimeout(() => {
+
+            global.reconnecting = false
+
             startBot()
-          }, 10000)
+
+          }, 15000)
         }
       }
     }
@@ -341,12 +385,16 @@ async function startBot() {
         const jid =
           m.key.remoteJid
 
-        // ignore group
+        // ======================
+        // IGNORE GROUP
+        // ======================
         if (
           jid.endsWith('@g.us')
         ) return
 
-        // ignore status
+        // ======================
+        // IGNORE STATUS
+        // ======================
         if (
           jid === 'status@broadcast'
         ) return
@@ -362,7 +410,7 @@ async function startBot() {
         if (!text) return
 
         // ======================
-        // LOAD USER
+        // GET USER
         // ======================
         let user =
           await User.findOne({ jid })
@@ -376,7 +424,9 @@ async function startBot() {
 
               memory: '',
 
-              mood: 'normal'
+              mood: 'normal',
+
+              lastChat: ''
             })
         }
 
@@ -396,10 +446,12 @@ async function startBot() {
         user.mood =
           detectMood(text)
 
+        user.lastChat = text
+
         await user.save()
 
         // ======================
-        // RESET TIMER
+        // CLEAR TIMER
         // ======================
         if (
           pendingReply[jid]
@@ -455,6 +507,17 @@ Ada yang bisa aku bantu?`
               )
 
               // ======================
+              // DELAY
+              // ======================
+              await new Promise(
+                resolve =>
+                  setTimeout(
+                    resolve,
+                    2000
+                  )
+              )
+
+              // ======================
               // AI REPLY
               // ======================
               const reply =
@@ -473,6 +536,9 @@ Ada yang bisa aku bantu?`
                 }
               )
 
+              // ======================
+              // STOP TYPING
+              // ======================
               await sock.sendPresenceUpdate(
                 'paused',
                 jid
@@ -492,7 +558,7 @@ Ada yang bisa aku bantu?`
       catch (err) {
 
         console.log(
-          '❌ Message Handler Error:',
+          '❌ Message Error:',
           err.message
         )
       }
