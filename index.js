@@ -187,7 +187,7 @@ async function startBot() {
     state,
     saveCreds
   } = await useMultiFileAuthState(
-    './session'
+    '/app/session'
   )
 
   const {
@@ -237,42 +237,6 @@ async function startBot() {
   )
 
   // ======================
-  // AUTO PAIRING
-  // ======================
-  setTimeout(async () => {
-
-    try {
-
-      if (
-        !sock.authState.creds.registered
-      ) {
-
-        const code =
-          await sock.requestPairingCode(
-            process.env.PHONE_NUMBER
-          )
-
-        console.log(`
-╔════════════════════╗
-     PAIRING CODE
-
-     ${code}
-
-╚════════════════════╝
-`)
-      }
-
-    } catch (err) {
-
-      console.log(
-        '❌ Pairing Error:',
-        err.message
-      )
-    }
-
-  }, 15000)
-
-  // ======================
   // CONNECTION UPDATE
   // ======================
   sock.ev.on(
@@ -285,13 +249,54 @@ async function startBot() {
       } = update
 
       // ======================
-      // CONNECTED
+      // OPEN
       // ======================
       if (connection === 'open') {
 
         console.log(
           '🤖 PERSONAL ASSISTANT ONLINE'
         )
+      }
+
+      // ======================
+      // PAIRING SYSTEM
+      // ======================
+      if (
+        connection === 'connecting'
+      ) {
+
+        setTimeout(async () => {
+
+          try {
+
+            if (
+              !sock.authState.creds.registered
+            ) {
+
+              const code =
+                await sock.requestPairingCode(
+                  process.env.PHONE_NUMBER
+                )
+
+              console.log(`
+╔════════════════════╗
+     PAIRING CODE
+
+     ${code}
+
+╚════════════════════╝
+`)
+            }
+
+          } catch (err) {
+
+            console.log(
+              '❌ Pairing Error:',
+              err.message
+            )
+          }
+
+        }, 20000)
       }
 
       // ======================
@@ -310,12 +315,12 @@ async function startBot() {
         if (shouldReconnect) {
 
           console.log(
-            '🔄 Reconnecting...'
+            '🔄 Restarting Bot...'
           )
 
           setTimeout(() => {
             startBot()
-          }, 5000)
+          }, 10000)
         }
       }
     }
@@ -337,23 +342,17 @@ async function startBot() {
         const jid =
           m.key.remoteJid
 
-        // ======================
-        // IGNORE GROUP
-        // ======================
+        // ignore group
         if (
           jid.endsWith('@g.us')
         ) return
 
-        // ======================
-        // IGNORE STATUS
-        // ======================
+        // ignore status
         if (
           jid === 'status@broadcast'
         ) return
 
-        // ======================
-        // IGNORE BOT MESSAGE
-        // ======================
+        // ignore own message
         if (m.key.fromMe) return
 
         // ======================
@@ -424,9 +423,6 @@ async function startBot() {
           )
         }
 
-        // ======================
-        // SAVE LAST TEXT
-        // ======================
         const lastText = text
 
         // ======================
